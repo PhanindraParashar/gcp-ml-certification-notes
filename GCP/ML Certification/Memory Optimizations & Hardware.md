@@ -283,6 +283,82 @@ Modern GPUs with Tensor Cores, such as NVIDIA's Volta, Turing, and Ampere archit
 
 Mixed precision not only speeds up training but also reduces the overall memory footprint, making it an ideal choice for training large models or when GPU memory is a constraint. The benefits are most evident when using hardware that supports Tensor Cores, as they provide specialized support for mixed precision operations.
 
+
+# Use case to understand and review the concepts
+**Use case: Diagnosing Training Bottlenecks in a Retail Image Recognition Model on GCP: A Consultant's Approach**
+
+**Use Case Overview**
+
+Imagine you are a data science consultant working with a mid-sized retail company, "RetailTrendz." They are developing a machine learning model for product image recognition to automate product categorization for their e-commerce website. The dataset consists of 500,000 product images distributed across 100 different categories, with the goal of reducing human labor in tagging products and improving the accuracy and consistency of categorization.
+
+RetailTrendz is using Google Cloud Platform (GCP) to manage this project, specifically utilizing Vertex AI with a GPU setup to train a convolutional neural network (CNN). The hardware environment includes an NVIDIA Tesla A100 GPU, which costs about $2.70 per hour. The initial budget was set to $5,000, with expectations that the training would be completed within five days.
+
+The project initially seemed on track, but a week has passed, and training is still running, with about $6,000 spent so far. The RetailTrendz team is concerned about escalating costs and prolonged timelines. They have approached you, as the consultant, to diagnose the issue and suggest optimizations.
+
+**Detailed Problem Scenario**
+
+Upon examination, you find the following:
+
+- **Hardware Setup**: One NVIDIA Tesla A100 GPU on Vertex AI.
+- **Dataset**: 500,000 images, each approximately 200 KB in size.
+- **Model**: A ResNet-50 architecture implemented in TensorFlow.
+- **Training Parameters**: Batch size of 64, using the Adam optimizer, with an initial learning rate of 0.001.
+- **Data Pipeline**: Data is being loaded from Google Cloud Storage (GCS) in JPEG format, using TensorFlow's tf.data API.
+- **Current Metrics**:
+  - GPU utilization is averaging around 40-50%.
+  - Training time per epoch is approximately 3 hours.
+  - The expected number of epochs for convergence was estimated at 50.
+  - Training has currently reached epoch 30, and the cost has already exceeded the budget.
+  
+**Consultant's Approach: Diagnosing the Issues**
+
+1. **Step 1: Identifying Bottlenecks in GPU Utilization**
+   
+   The first indication of a problem is low GPU utilization (40-50%). For an A100 GPU, you should be seeing close to 80-90% utilization during training if the pipeline is optimized correctly. This suggests that the GPU is not being fully fed with data and may be idling while waiting for input batches.
+
+   **Actions Taken**:
+   - **Profile the Data Pipeline**: Using TensorFlow's Profiler tool, you identify that the data pipeline has substantial wait times, indicating a bottleneck in data loading. This suggests that data is not being read from GCS fast enough to keep up with the GPU.
+   - **Hypothesis**: The data loading from GCS is causing delays, preventing the GPU from being effectively utilized.
+
+2. **Step 2: Optimizing the Data Pipeline**
+
+   **Data Loading Optimization**:
+   - **Current Configuration**: Images are being loaded in real-time from GCS in their raw JPEG format. This means every batch requires individual images to be read, decoded, and loaded, which adds significant I/O latency.
+   - **Solution**: Convert the dataset to TFRecord format. TFRecord is a more efficient binary storage format that speeds up data retrieval times, especially when paired with the tf.data API.
+
+   After converting the dataset to TFRecord, you re-run the profiling and see an immediate improvement—data loading wait times are reduced by nearly 60%. You also add `dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)` to further optimize the data flow.
+
+3. **Step 3: Experimenting with Batch Size and Mixed Precision**
+
+   **Batch Size Issues**:
+   - **Current Configuration**: The batch size is set to 64, which seemed reasonable based on memory calculations.
+   - **Observation**: The Profiler still indicates room for increased memory usage, meaning the A100 GPU is not fully utilized in terms of memory.
+   - **Adjustment**: Increase the batch size from 64 to 128. After doing this, you see a significant increase in GPU utilization, from 50% to around 75-80%, and the training time per epoch decreases to approximately 2 hours.
+
+   **Mixed Precision Training**:
+   - You enable mixed precision training, which leverages the A100’s Tensor Cores for FP16 operations. This results in an additional speed boost, with training time per epoch reducing from 2 hours to 1.5 hours, and GPU utilization reaching 85-90%.
+
+4. **Step 4: Reviewing Distributed Training Options**
+
+   Given the scale of the dataset and the prolonged training time, you consider distributed training:
+   - **Multi-Worker Strategy**: You recommend adding a second A100 GPU and using `tf.distribute.MultiWorkerMirroredStrategy` to distribute the workload across multiple GPUs. This can potentially halve the training time per epoch.
+   - **Cost Consideration**: The client decides to add an extra $2,000 to the budget, which allows them to add another GPU for faster convergence.
+
+5. **Step 5: Results and Final Optimization**
+
+   After implementing the above changes:
+   - **Training Time**: Training time per epoch drops from 3 hours to 45 minutes with distributed training and mixed precision enabled.
+   - **GPU Utilization**: Now stabilized at 90-95%, meaning the GPUs are fully utilized.
+   - **Cost Efficiency**: The total cost is projected to be around $8,000, with training completing in two more days. This is an improvement from the initial estimated overrun of $12,000 and several additional weeks.
+
+**Synopsis of usecase**
+
+The core issue was a poorly optimized data pipeline that couldn't keep up with the computational power of the A100 GPU, causing underutilization and prolonged training times. By converting the dataset to TFRecord, enabling prefetching, increasing batch size, and using mixed precision, the data pipeline became efficient enough to keep the GPU busy. Additionally, scaling the infrastructure to multiple GPUs with MultiWorkerMirroredStrategy allowed for further reduction in training time.
+
+These optimizations ensured that RetailTrendz not only completed their project within an acceptable timeframe but also kept costs within a manageable range, ultimately leading to a successful deployment of the image recognition model.
+
+
+
 ### Conclusion
 
 Vertex AI provides powerful tools for scaling machine learning experiments, from memory management to distributed training. By combining best practices in resource management, custom training jobs, managed datasets, and scaling strategies, you can make sure your model training is efficient, cost-effective, and reliable.
